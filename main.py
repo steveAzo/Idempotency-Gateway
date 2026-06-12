@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import time
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException
@@ -19,11 +20,14 @@ class PaymentRequest(BaseModel):
 class StoredResponse(BaseModel):
     status_code: int
     body: dict
-    request_hash: str  
+    request_hash: str
+    created_at: float 
 
 
 # in-memory store
 idempotency_store: dict[str, StoredResponse] = {}
+
+KEY_TTL_SECONDS = 86400  
 
 # one asyncio.Lock per idempotency key — keeps concurrent identical requests serialised
 in_flight_locks: dict[str, asyncio.Lock] = {}
@@ -56,15 +60,19 @@ async def process_payment(
         if idempotency_key in idempotency_store:
             stored = idempotency_store[idempotency_key]
 
-            if stored.request_hash != incoming_hash:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Idempotency key already used for a different request body.",
-                )
+            if time.time() - stored.created_at > KEY_TTL_SECONDS:
+                # Key has expired — evict it and fall through to fresh processing
+                del idempotency_store[idempotency_key]
+            else:
+                if stored.request_hash != incoming_hash:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Idempotency key already used for a different request body.",
+                    )
 
-            response = JSONResponse(content=stored.body, status_code=stored.status_code)
-            response.headers["X-Cache-Hit"] = "true"
-            return response
+                response = JSONResponse(content=stored.body, status_code=stored.status_code)
+                response.headers["X-Cache-Hit"] = "true"
+                return response
 
         # Simulate payment processing (2-second delay)
         await asyncio.sleep(2)
@@ -77,6 +85,7 @@ async def process_payment(
             status_code=201,
             body=result,
             request_hash=incoming_hash,
+            created_at=time.time(),
         )
 
         return result
