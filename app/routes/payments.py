@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.config import KEY_TTL_SECONDS
+from app.config import KEY_TTL_SECONDS, PROCESSING_DELAY_SECONDS
 from app.models import PaymentRequest, StoredResponse
 from app.store import hash_body, idempotency_store, in_flight_locks
 
@@ -41,7 +41,7 @@ async def process_payment(
                 return response
 
         # Simulate payment processing
-        await asyncio.sleep(2)
+        await asyncio.sleep(PROCESSING_DELAY_SECONDS)
         result = {
             "status": "success",
             "message": f"Charged {payment.amount} {payment.currency}",
